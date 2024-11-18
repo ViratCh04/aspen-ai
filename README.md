@@ -12,6 +12,7 @@ To run this project,
     ```
 - Simply run
     ```
+    cd src/
     python demo.py
     ```
 
