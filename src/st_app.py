@@ -9,14 +9,12 @@ import hashlib
 load_dotenv(override=True)
 
 def get_file_hash(file_content):
-    """Generate a hash for the file content to use as a unique identifier."""
     return hashlib.md5(file_content).hexdigest()
 
 def display_sources(sources):
     with st.expander("View Sources"):
         for i, doc in enumerate(sources, 1):
-            st.markdown(f"""
-            **Source {i}**
+            st.markdown(f"""**Source {i}**
             - Page: {doc.metadata.get('page', 'N/A')}
             - Content: {doc.page_content[:200]}...
             """)
@@ -26,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="RAG Bot", layout="wide")
 
-# Initialize session state variables
 if "messages" not in st.session_state:
     st.session_state.messages = []
 

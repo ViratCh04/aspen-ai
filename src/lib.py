@@ -4,15 +4,14 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.memory import ConversationBufferMemory
 from langchain.chains import ConversationalRetrievalChain
-from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import Distance, VectorParams
 
+# Type chainlit run cl_app.py -w to run app
 
 class RagClient:
     def __init__(self):
@@ -74,10 +73,8 @@ class RagClient:
         except UnexpectedResponse as e:
             print(f"Error accessing Qdrant collection: {e}")
             raise
-    
+    #TODO: Please rename the method, circular callbacks are bad
     def add_documents(self, file: str = "../docs/guide to peft.pdf"):
-        # Testing out the LLama paper
-        #loader = PyPDFLoader("../docs/2302.13971v1 llama.pdf")
         #loader = PyPDFLoader("../docs/LoRA.pdf")
         #loader = PyPDFLoader("../docs/guide to peft.pdf")
         loader = PyPDFLoader(file)
@@ -90,79 +87,48 @@ class RagClient:
 
     def init_retriever(self):
         self.retriever = self.vector_store.as_retriever(
-            search_type="similarity", search_kwargs={"k": 6}
+            search_type="similarity_score_threshold",
+            search_kwargs={
+                "k": 5,  # Reduced for more focused results
+                "score_threshold": 0.7,  # Increased for better relevance
+            }
         )
-        # retrieved_docs = retriever.invoke("What is this paper about?")
-        # print(len(retrieved_docs))
-        # print(retrieved_docs)
 
     def setup_chain(self):
-        # TODO: Create custom prompt, this one is severely limited to only generating three sentences responses at max and can be customised much more to generate better responses specific to our use case
-        #prompt = hub.pull("rlm/rag-prompt")
-        template = """You are an expert tutor who will be a teaching assistant. Use the following pieces of context to answer the question at the end. 
-        If you don't know the answer, just say that you don't know. Don't try to make up an answer.
-        
+        PROMPT_TEMPLATE = """
+        You are an expert tutor who will be a teaching assistant. 
+        Answer questions based on the given context. Be direct and specific.
+
+        Guidelines:
+        - Always base your answers on the provided context
+        - For follow-up questions, refer to previous chat history when relevant
+        - If information isn't in the context, say "I cannot find this information in the provided documents"
+        - Include specific references to the source material when possible
+
         Context:
         {context}
-        
-        Question: {question}
-        
-        Instructions:
-        - Base your answer strictly on the provided context
-        - If the context doesn't contain relevant information, say so
-        - Include specific citations or references from the documents where applicable
-        - Maintain a formal, professional tone suitable for communication
-        - If the question requires clarification, ask for it
-        - If the user is asking for any specific information, provide it if available in your memory
-        
-        Answer:"""
-        
-        prompt = ChatPromptTemplate.from_template(template)
-        
-        def format_docs(docs):
-            return "\n\n".join(doc.page_content for doc in docs)
 
-        qa_chain = ConversationalRetrievalChain.from_llm(
-            llm=ChatOpenAI(),
-            retriever=self.retriever,
-            return_source_documents=True,
-        )
-        #self.rag_chain = (
-        #    {"context": self.retriever | format_docs, "question": RunnablePassthrough()}
-        #    | prompt
-        #    | self.llm
-        #    | StrOutputParser()
-        #)
+        Chat History:
+        {chat_history}
+
+        Question: {question}
+
+        Answer: 
+        """
+
+        # Configure the chain with enhanced settings
         self.rag_chain = ConversationalRetrievalChain.from_llm(
-        llm=self.llm,
-        retriever=self.retriever,
-        memory=ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True,
-            output_key="answer"
-        ),
-        return_source_documents=True,
-        combine_docs_chain_kwargs={
-            "prompt": ChatPromptTemplate.from_template("""You are an expert tutor who will be a teaching assistant. Use the following pieces of context to answer the question at the end.
-            If the user asks follow up questions, provide it if available in your memory.
-            If you don't know the answer, just say that you don't know. Don't try to make up an answer.
-            
-            Context:
-            {context}
-            
-            Chat History:
-            {chat_history}
-            
-            Question: {question}
-            
-            Instructions:
-            - Base your answer strictly on the provided context
-            - If the context doesn't contain relevant information, say so
-            - Include specific citations or references from the documents where applicable
-            - Maintain a formal, professional tone suitable for communication
-            - If the question requires clarification, ask for it
-            - If the user is asking for any specific information, provide it if available in your memory
-            
-            Answer:""")
-        }
-    )
+            llm=self.llm,
+            retriever=self.retriever,
+            memory=ConversationBufferMemory(
+                memory_key="chat_history",
+                return_messages=True,
+                output_key="answer"
+            ),
+            return_source_documents=True,
+            combine_docs_chain_kwargs={
+                "prompt": ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
+            },
+            chain_type="stuff",  # Use 'stuff' method for combining documents
+            verbose=True  # Help with debugging
+        )
