@@ -1,9 +1,9 @@
 import os
 
+from langchain.chains import ConversationalRetrievalChain
+from langchain.memory import ConversationBufferMemory
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader
-from langchain.memory import ConversationBufferMemory
-from langchain.chains import ConversationalRetrievalChain
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_qdrant import QdrantVectorStore
@@ -11,7 +11,6 @@ from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.models import Distance, VectorParams
 
-# Type chainlit run cl_app.py -w to run app
 
 class RagClient:
     def __init__(self):
@@ -37,7 +36,7 @@ class RagClient:
         self.qdrant_client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
 
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=300, chunk_overlap=40, length_function=len
+            chunk_size=700, chunk_overlap=70, length_function=len
         )
 
         try:
@@ -73,37 +72,39 @@ class RagClient:
         except UnexpectedResponse as e:
             print(f"Error accessing Qdrant collection: {e}")
             raise
-    #TODO: Please rename the method, circular callbacks are bad
+
+    # TODO: Please rename the method, circular callbacks are bad
     def add_documents(self, file: str = "../docs/guide to peft.pdf"):
-        #loader = PyPDFLoader("../docs/LoRA.pdf")
-        #loader = PyPDFLoader("../docs/guide to peft.pdf")
+        # loader = PyPDFLoader("../docs/LoRA.pdf")
         loader = PyPDFLoader(file)
         pages = loader.load_and_split()
         chunks = self.text_splitter.split_documents(pages)
-        # Storing doc chunks in vector store
         self.vector_store.add_documents(chunks)
-        
-        return f"Stored {len(chunks)} document chunks in database."
+
+        return f"Successfully stored {len(chunks)} document chunks in database."
 
     def init_retriever(self):
         self.retriever = self.vector_store.as_retriever(
-            search_type="similarity_score_threshold",
+            search_type="mmr",  # Changed to MMR for diversity
             search_kwargs={
-                "k": 5,  # Reduced for more focused results
-                "score_threshold": 0.7,  # Increased for better relevance
-            }
+                "k": 5,
+                "fetch_k": 20,  # Fetch more candidates initially
+                "lambda_mult": 0.7,  # Controls diversity (0.0-1.0). Higher = more similarity focused
+            },
         )
 
     def setup_chain(self):
         PROMPT_TEMPLATE = """
         You are an expert tutor who will be a teaching assistant. 
         Answer questions based on the given context. Be direct and specific.
-
+        
         Guidelines:
         - Always base your answers on the provided context
+        - Synthesize information from different sources
         - For follow-up questions, refer to previous chat history when relevant
         - If information isn't in the context, say "I cannot find this information in the provided documents"
         - Include specific references to the source material when possible
+        - Each piece of information should cite its source page number
 
         Context:
         {context}
@@ -113,22 +114,18 @@ class RagClient:
 
         Question: {question}
 
-        Answer: 
-        """
+        Please provide a comprehensive answer that combines information from different sources:"""
 
-        # Configure the chain with enhanced settings
         self.rag_chain = ConversationalRetrievalChain.from_llm(
             llm=self.llm,
             retriever=self.retriever,
             memory=ConversationBufferMemory(
-                memory_key="chat_history",
-                return_messages=True,
-                output_key="answer"
+                memory_key="chat_history", return_messages=True, output_key="answer"
             ),
             return_source_documents=True,
             combine_docs_chain_kwargs={
                 "prompt": ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
             },
             chain_type="stuff",  # Use 'stuff' method for combining documents
-            verbose=True  # Help with debugging
+            verbose=True
         )

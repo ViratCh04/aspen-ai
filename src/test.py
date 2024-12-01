@@ -7,7 +7,7 @@ load_dotenv(override=True)
 
 def main():
     client = RagClient()
-    #client.create_collection()
+    # client.create_collection()
     client.add_documents()
     client.init_retriever()
     client.setup_chain()
